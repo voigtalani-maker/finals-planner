@@ -801,7 +801,7 @@
   /* ---------- Configuration ---------- */
 
   var DAY_START_HOUR = 6;
-  var DAY_END_HOUR = 22;      // capped to 20:00 on every day except Saturday
+  var DAY_END_HOUR = 22;      // every day, so every slot on the grid can be filled
   // Suggested study, breaks and free hours only use this window; the hours
   // around it stay on the grid, empty, for her to fill in herself.
   var STUDY_START_HOUR = 8;
@@ -946,9 +946,8 @@
     });
   }
 
-  // Saturdays run late; every other day stops at 20:00.
-  function dayEndHour(weekday) {
-    return weekday === 'Sat' ? 22 : Math.min(DAY_END_HOUR, 20);
+  function dayEndHour() {
+    return DAY_END_HOUR;
   }
 
   // An hour's break after every STUDY_RUN hours of study. The run restarts
