@@ -774,8 +774,9 @@
       </div>
       <p class="targets-note">
         Set the least hours you need for each paper and the grid plans them for you between 08:00 and 18:00 (20:00 on Saturdays),
-        before each paper is written. When they don&rsquo;t all fit, every paper gives up about the same share and its
-        card says how many hours are short. Anything you pick yourself counts too, and the plan works around it.
+        before each paper is written. If they still don&rsquo;t all fit, every paper gives up about the same share and its
+        card says how many hours are short. When the day is full, evenings up to 22:00 are used, but only for the
+        hours that would otherwise be missing. Anything you pick yourself counts too, and the plan works around it.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
         what you have planned. Free hours are the study hours (08:00 to 18:00, Saturdays to 20:00), from today on, that nothing has been
         planned in yet. Each paper links to its SAG, opened at that paper&rsquo;s topics, and you can attach your own
@@ -809,6 +810,8 @@
   var STUDY_START_HOUR = 8;
   var STUDY_END_HOUR = 18;
   var SAT_STUDY_END_HOUR = 20;   // she can work later on a Saturday
+  // Evenings up to here are only planned when a paper's hours do not fit in the day.
+  var EVENING_END_HOUR = 22;
   var SHOW_EXAM_BADGE = true;
   var STUDY_RUN = 2;          // hours of study before an hour's break
   var REST_AFTER_EXAM = 3;    // hours off straight after a paper
@@ -974,7 +977,7 @@
     for (var x = DAY_START_HOUR; x < dayEndHour(d.weekday) && firstExam === null; x++) {
       if (EXAM_MAP[d.dateStr + '_' + x]) firstExam = x;
     }
-    for (var h = STUDY_START_HOUR; h < studyEndHour(d.weekday); h++) {
+    for (var h = STUDY_START_HOUR; h < EVENING_END_HOUR; h++) {
       var key = d.dateStr + '_' + h;
       if (firstExam !== null && h < firstExam) { BREAK_HOURS[key] = true; continue; }
       if (EXAM_MAP[key]) { run = 0; continue; }
@@ -991,7 +994,7 @@
   // plan.cell: 'YYYY-MM-DD_H' -> subject suggested there
   // plan.got:  subject id -> hours suggested before its paper
   // plan.short: subject id -> hours of its target that do not fit
-  var plan = { cell: {}, got: {}, short: {} };
+  var plan = { cell: {}, got: {}, short: {}, eveningDays: {} };  // eveningDays: dates whose evening is used
 
   // Fills every open study hour from today on (08:00-18:00, not a break, not an
   // exam, not something she picked) one block at a time. Each block goes to the
@@ -1014,10 +1017,11 @@
     ALL_DAYS.forEach(function (d) {
       if (d.dateStr < today) return;
       block++;
-      for (var h = STUDY_START_HOUR; h < studyEndHour(d.weekday); h++) {
+      for (var h = STUDY_START_HOUR; h < EVENING_END_HOUR; h++) {
         var key = d.dateStr + '_' + h;
         if (EXAM_MAP[key] || BREAK_HOURS[key] || state.overrides[key] !== undefined) { block++; continue; }
-        slots.push({ key: key, date: d.dateStr, block: block, i: slots.length });
+        var evening = h >= studyEndHour(d.weekday);
+        slots.push({ key: key, date: d.dateStr, block: block, i: slots.length, evening: evening });
       }
     });
 
@@ -1029,19 +1033,25 @@
       cutoff[s.id] = i;
     });
 
+    // Daytime hours before each paper; the evenings only come in after these.
+    var dayBefore = {};
+    SUBJECTS.forEach(function (s) {
+      dayBefore[s.id] = slots.slice(0, cutoff[s.id]).filter(function (slot) { return !slot.evening; }).length;
+    });
+
     // Fair share: repeatedly find the tightest deadline (open hours before it
     // against hours wanted by every paper due by then), scale those papers by
     // that ratio, and carry on with the rest and the hours left over.
     var fair = {};
     var queue = SUBJECTS.map(function (s) { return s.id; })
       .filter(function (id) { return need[id] > 0; })
-      .sort(function (a, b) { return cutoff[a] - cutoff[b]; });
+      .sort(function (a, b) { return dayBefore[a] - dayBefore[b]; });
     var used = 0;
     while (queue.length) {
       var worst = 0, worstRatio = Infinity, sum = 0;
       queue.forEach(function (id, k) {
         sum += need[id];
-        var ratio = (cutoff[id] - used) / sum;
+        var ratio = (dayBefore[id] - used) / sum;
         if (ratio <= worstRatio) { worstRatio = ratio; worst = k; }
       });
       var f = Math.max(0, Math.min(1, worstRatio));
@@ -1051,7 +1061,7 @@
       });
     }
 
-    plan = { cell: {}, got: {}, short: {} };
+    plan = { cell: {}, got: {}, short: {}, eveningDays: {} };
 
     function fill(open, want) {
       var cur = null, curBlock = null, prevSubj = null;
@@ -1078,16 +1088,16 @@
       });
     }
 
-    fill(slots, fair);
-    // Any hours the fair share left open go to whatever is still short.
-    var rest = {};
-    SUBJECTS.forEach(function (s) { rest[s.id] = need[s.id] - (plan.got[s.id] || 0); });
-    fill(slots.filter(function (slot) { return !plan.cell[slot.key]; }), rest);
+    function stillShort() {
+      var rest = {};
+      SUBJECTS.forEach(function (s) { rest[s.id] = need[s.id] - (plan.got[s.id] || 0); });
+      return rest;
+    }
 
-    // An hour still open now is one only late papers can use. If a late paper
-    // is sitting in an earlier hour that a short paper could have had, move it
+    // An hour still open is one only late papers can use. If a late paper is
+    // sitting in an earlier hour that a short paper could have had, move it
     // down into the open hour and give its old hour to the short paper.
-    slots.forEach(function (open) {
+    function repair(open) {
       if (plan.cell[open.key]) return;
       for (var j = open.i - 1; j >= 0; j--) {
         var earlier = slots[j];
@@ -1105,7 +1115,19 @@
         plan.got[taker] = (plan.got[taker] || 0) + 1;
         break;
       }
-    });
+    }
+
+    var daytime = slots.filter(function (slot) { return !slot.evening; });
+    var evenings = slots.filter(function (slot) { return slot.evening; });
+
+    fill(daytime, fair);
+    // Daytime hours the fair share left open go to whatever is still short.
+    fill(daytime.filter(function (slot) { return !plan.cell[slot.key]; }), stillShort());
+    daytime.forEach(repair);
+    // Only now, and only for the hours that are still missing, the evenings.
+    fill(evenings, stillShort());
+    evenings.forEach(repair);
+    evenings.forEach(function (slot) { if (plan.cell[slot.key]) plan.eveningDays[slot.date] = true; });
 
     SUBJECTS.forEach(function (s) {
       var short = need[s.id] - (plan.got[s.id] || 0);
@@ -1473,7 +1495,9 @@
         var key = d.dateStr + '_' + h;
         var examSubj = EXAM_MAP[key];
         var ov = state.overrides[key];
-        var isFixedBreak = !!BREAK_HOURS[key];
+        // Evening breaks only show on a day whose evening the plan actually uses.
+        var isFixedBreak = !!BREAK_HOURS[key] &&
+          (h < studyEndHour(d.weekday) || !!plan.eveningDays[d.dateStr]);
 
         // The auto-plan first; where it has nothing (past days, or every target
         // already met) rotate through the papers coming up, one per block.
