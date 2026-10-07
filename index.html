@@ -652,6 +652,18 @@
 
   .file-link:hover { color: var(--color-accent-700); }
 
+  /* The paper's SAG, opened at its topics page, above the own-file slot. */
+  .target-sag {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 9px;
+    font-size: 11.5px;
+    min-width: 0;
+  }
+
+  .target-sag .file-link { flex: 0 1 auto; }
+
   .file-size {
     color: var(--color-neutral-700);
     flex-shrink: 0;
@@ -764,7 +776,7 @@
         yourself are counted &mdash; to count a suggested block, open it and choose <strong>&#10003; Keep</strong>.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
         what you have planned. Free hours count everything from today onwards that is not an exam, a break or already
-        planned &mdash; the hours before a morning paper are left out. Attach each paper&rsquo;s demarcation at the
+        planned &mdash; the hours before a morning paper are left out. Each paper links to its SAG, opened at that paper&rsquo;s topics, and you can attach your own demarcation at the
         foot of its card; files stay on this device only.
       </p>
       <div class="targets" id="targets"></div>
@@ -810,21 +822,22 @@
   var PASTELS = ['#FFD6E0', '#FFE3C2', '#FFF3B0', '#D9F2D0', '#C6EDE3', '#C9E4FF', '#DAD6FF', '#F0D6FF',
                  '#FFD6F0', '#E4E0D6', '#FFC9B3', '#BEE9C9', '#BEDCFF', '#E3C6FF', '#FFC6DC', '#D8CBB8'];
 
+  // `sag` opens the subject's IEB SAG at the page listing that paper's topics.
   var SUBJECTS = [
-    { id: 'mathsP1',     label: 'Mathematics P1' },
-    { id: 'mathsP2',     label: 'Mathematics P2' },
-    { id: 'englishP1',   label: 'English FAL P1' },
-    { id: 'englishP2',   label: 'English FAL P2' },
-    { id: 'afrikaansP1', label: 'Afrikaans Huistaal P1' },
-    { id: 'afrikaansP2', label: 'Afrikaans Huistaal P2' },
-    { id: 'egdP1',       label: 'EGD P1' },
-    { id: 'egdP2',       label: 'EGD P2' },
-    { id: 'lifeSciP1',   label: 'Life Sciences P1' },
-    { id: 'lifeSciP2',   label: 'Life Sciences P2' },
-    { id: 'catP1',       label: 'CAT P1 (Practical)' },
-    { id: 'catP2',       label: 'CAT P2 (Theory)' },
-    { id: 'physSciP1',   label: 'Physical Sciences P1' },
-    { id: 'physSciP2',   label: 'Physical Sciences P2' }
+    { id: 'mathsP1',     label: 'Mathematics P1',        sag: { file: 'wiskunde-sag.pdf', page: 1, topic: 'Vraestel 1-inhoud' } },
+    { id: 'mathsP2',     label: 'Mathematics P2',        sag: { file: 'wiskunde-sag.pdf', page: 1, topic: 'Vraestel 2-inhoud' } },
+    { id: 'englishP1',   label: 'English FAL P1',        sag: { file: 'english-fal-sag.pdf', page: 1, topic: 'Paper I: Making meaning of text' } },
+    { id: 'englishP2',   label: 'English FAL P2',        sag: { file: 'english-fal-sag.pdf', page: 2, topic: 'Paper II: Writing' } },
+    { id: 'afrikaansP1', label: 'Afrikaans Huistaal P1', sag: { file: 'afrikaans-huistaal-sag.pdf', page: 1, topic: 'Vraestel 1: Leesvraestel' } },
+    { id: 'afrikaansP2', label: 'Afrikaans Huistaal P2', sag: { file: 'afrikaans-huistaal-sag.pdf', page: 4, topic: 'Vraestel 2: Skryfvraestel' } },
+    { id: 'egdP1',       label: 'EGD P1',                sag: { file: 'igo-sag.pdf', page: 11, topic: 'Vraestel 1: Siviel' } },
+    { id: 'egdP2',       label: 'EGD P2',                sag: { file: 'igo-sag.pdf', page: 11, topic: 'Vraestel 2: Meganies' } },
+    { id: 'lifeSciP1',   label: 'Life Sciences P1',      sag: { file: 'lewenswetenskappe-sag.pdf', page: 30, topic: 'Graad 12-sillabus' } },
+    { id: 'lifeSciP2',   label: 'Life Sciences P2',      sag: { file: 'lewenswetenskappe-sag.pdf', page: 30, topic: 'Graad 12-sillabus' } },
+    { id: 'catP1',       label: 'CAT P1 (Practical)',    sag: { file: 'cat-sag.pdf', page: 46, topic: 'Practical curriculum' } },
+    { id: 'catP2',       label: 'CAT P2 (Theory)',       sag: { file: 'cat-sag.pdf', page: 35, topic: 'Theory curriculum' } },
+    { id: 'physSciP1',   label: 'Physical Sciences P1',  sag: { file: 'fisiese-wetenskappe-sag.pdf', page: 27, topic: 'I. Fisika' } },
+    { id: 'physSciP2',   label: 'Physical Sciences P2',  sag: { file: 'fisiese-wetenskappe-sag.pdf', page: 41, topic: 'II. Chemie' } }
   ];
 
   SUBJECTS.forEach(function (s, i) { s.color = PASTELS[i % PASTELS.length]; });
@@ -1421,6 +1434,18 @@
       var doneValue = el('span', 'done-value');
       doneRow.appendChild(doneValue);
       row.appendChild(doneRow);
+
+      if (s.sag) {
+        var sagRow = el('div', 'target-sag');
+        var sagLink = el('a', 'file-link', '📘 SAG · ' + s.sag.topic);
+        sagLink.href = 'sags/' + s.sag.file + '#page=' + s.sag.page;
+        sagLink.target = '_blank';
+        sagLink.rel = 'noopener';
+        sagLink.title = 'Open the SAG for ' + s.label + ' at page ' + s.sag.page;
+        sagRow.appendChild(sagLink);
+        sagRow.appendChild(el('span', 'file-size', 'p. ' + s.sag.page));
+        row.appendChild(sagRow);
+      }
 
       var fileRow = el('div', 'target-file');
       var fileLabel = el('label', 'file-btn', '📎 Add demarcation');
