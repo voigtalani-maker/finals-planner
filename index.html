@@ -527,6 +527,7 @@
   }
 
   .target-meta .is-done { color: var(--color-accent-700); font-weight: 600; }
+  .target-meta .is-short { color: #b4532a; }
 
   /* Draggable "hours actually studied" bar. */
   .target-done {
@@ -772,12 +773,13 @@
         </div>
       </div>
       <p class="targets-note">
-        Set how many hours you want to spend on each paper, then fill them into the grid above. Only hours you pick
-        yourself are counted &mdash; to count a suggested block, open it and choose <strong>&#10003; Keep</strong>.
+        Set the least hours you need for each paper and the grid plans them for you between 08:00 and 18:00,
+        before each paper is written. When they don&rsquo;t all fit, every paper gives up about the same share and its
+        card says how many hours are short. Anything you pick yourself counts too, and the plan works around it.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
-        what you have planned. Free hours count everything from today onwards that is not an exam, a break or already
-        planned &mdash; the hours before a morning paper are left out. Each paper links to its SAG, opened at that paper&rsquo;s topics, and you can attach your own demarcation at the
-        foot of its card; files stay on this device only.
+        what you have planned. Free hours are the hours from 08:00 to 18:00, from today on, that nothing has been
+        planned in yet. Each paper links to its SAG, opened at that paper&rsquo;s topics, and you can attach your own
+        demarcation at the foot of its card; files stay on this device only.
       </p>
       <div class="targets" id="targets"></div>
     </div>
@@ -849,6 +851,13 @@
 
   var SUBJ_BY_ID = {};
   SUBJECTS.forEach(function (s) { SUBJ_BY_ID[s.id] = s; });
+
+  // Alani's minimum hours per paper (set 7 Oct 2026). Used on any device that
+  // has no targets saved yet, so her phone starts from the same numbers.
+  var DEFAULT_TARGETS = {
+    mathsP1: 30, mathsP2: 30, englishP1: 18, englishP2: 28, afrikaansP1: 30, afrikaansP2: 26,
+    egdP1: 12, egdP2: 14, lifeSciP1: 30, lifeSciP2: 30, catP1: 26, catP2: 32, physSciP1: 40, physSciP2: 40
+  };
 
   // date -> { close?: true, sessions: [{ subj, hours: [start...] }] }
   // 2026 IEB NSC final timetable (NSC Circular 38 of 2026). Every paper
@@ -969,6 +978,136 @@
     }
   });
 
+  /* ---------- Auto-plan: spread each paper's hours over the time before it ---------- */
+
+  var EXAM_DATE = {};             // subject id -> date of its paper
+  EXAM_LIST.forEach(function (e) { EXAM_DATE[e.subj] = e.date; });
+
+  // plan.cell: 'YYYY-MM-DD_H' -> subject suggested there
+  // plan.got:  subject id -> hours suggested before its paper
+  // plan.short: subject id -> hours of its target that do not fit
+  var plan = { cell: {}, got: {}, short: {} };
+
+  // Fills every open study hour from today on (08:00-18:00, not a break, not an
+  // exam, not something she picked) one block at a time. Each block goes to the
+  // paper with the most hours still needed per open hour left before it is
+  // written, so the closer papers come first without starving the later ones.
+  //
+  // When the targets cannot all fit, they are first scaled down so that every
+  // paper squeezed by the same deadline loses the same share, instead of the
+  // early papers getting everything and the later ones whatever is left.
+  function buildPlan() {
+    var today = todayStr();
+    var mine = plannedHours();
+    var need = {};
+    SUBJECTS.forEach(function (s) {
+      need[s.id] = Math.max(0, (state.targets[s.id] || 0) - (mine[s.id] || 0));
+    });
+
+    var slots = [];               // { key, date, block, i }
+    var block = 0;
+    ALL_DAYS.forEach(function (d) {
+      if (d.dateStr < today) return;
+      block++;
+      for (var h = STUDY_START_HOUR; h < STUDY_END_HOUR; h++) {
+        var key = d.dateStr + '_' + h;
+        if (EXAM_MAP[key] || BREAK_HOURS[key] || state.overrides[key] !== undefined) { block++; continue; }
+        slots.push({ key: key, date: d.dateStr, block: block, i: slots.length });
+      }
+    });
+
+    // Index of the first slot on or after each paper's day: the hours before it are hers.
+    var cutoff = {};
+    SUBJECTS.forEach(function (s) {
+      var i = 0;
+      while (i < slots.length && slots[i].date < EXAM_DATE[s.id]) i++;
+      cutoff[s.id] = i;
+    });
+
+    // Fair share: repeatedly find the tightest deadline (open hours before it
+    // against hours wanted by every paper due by then), scale those papers by
+    // that ratio, and carry on with the rest and the hours left over.
+    var fair = {};
+    var queue = SUBJECTS.map(function (s) { return s.id; })
+      .filter(function (id) { return need[id] > 0; })
+      .sort(function (a, b) { return cutoff[a] - cutoff[b]; });
+    var used = 0;
+    while (queue.length) {
+      var worst = 0, worstRatio = Infinity, sum = 0;
+      queue.forEach(function (id, k) {
+        sum += need[id];
+        var ratio = (cutoff[id] - used) / sum;
+        if (ratio <= worstRatio) { worstRatio = ratio; worst = k; }
+      });
+      var f = Math.max(0, Math.min(1, worstRatio));
+      queue.splice(0, worst + 1).forEach(function (id) {
+        fair[id] = Math.floor(need[id] * f);
+        used += fair[id];
+      });
+    }
+
+    plan = { cell: {}, got: {}, short: {} };
+
+    function fill(open, want) {
+      var cur = null, curBlock = null, prevSubj = null;
+      open.forEach(function (slot) {
+        var newBlock = slot.block !== curBlock;
+        if (newBlock || !cur || want[cur] <= 0 || slot.i >= cutoff[cur]) {
+          if (newBlock) prevSubj = cur;
+          var best = null, bestScore = 0;
+          SUBJECTS.forEach(function (s) {
+            if (!(want[s.id] > 0) || slot.i >= cutoff[s.id]) return;
+            var score = want[s.id] / (cutoff[s.id] - slot.i);
+            if (s.id === prevSubj) score *= 0.8;     // mix it up from block to block
+            if (score > bestScore || (score === bestScore && best && EXAM_DATE[s.id] < EXAM_DATE[best])) {
+              best = s.id; bestScore = score;
+            }
+          });
+          cur = best;
+          curBlock = slot.block;
+        }
+        if (!cur) return;
+        plan.cell[slot.key] = cur;
+        plan.got[cur] = (plan.got[cur] || 0) + 1;
+        want[cur]--;
+      });
+    }
+
+    fill(slots, fair);
+    // Any hours the fair share left open go to whatever is still short.
+    var rest = {};
+    SUBJECTS.forEach(function (s) { rest[s.id] = need[s.id] - (plan.got[s.id] || 0); });
+    fill(slots.filter(function (slot) { return !plan.cell[slot.key]; }), rest);
+
+    // An hour still open now is one only late papers can use. If a late paper
+    // is sitting in an earlier hour that a short paper could have had, move it
+    // down into the open hour and give its old hour to the short paper.
+    slots.forEach(function (open) {
+      if (plan.cell[open.key]) return;
+      for (var j = open.i - 1; j >= 0; j--) {
+        var earlier = slots[j];
+        var late = plan.cell[earlier.key];
+        if (!late || cutoff[late] <= open.i) continue;
+        var taker = null;
+        SUBJECTS.forEach(function (s) {
+          var left = need[s.id] - (plan.got[s.id] || 0);
+          if (left > 0 && earlier.i < cutoff[s.id] &&
+              (!taker || left > need[taker] - (plan.got[taker] || 0))) taker = s.id;
+        });
+        if (!taker) continue;
+        plan.cell[open.key] = late;
+        plan.cell[earlier.key] = taker;
+        plan.got[taker] = (plan.got[taker] || 0) + 1;
+        break;
+      }
+    });
+
+    SUBJECTS.forEach(function (s) {
+      var short = need[s.id] - (plan.got[s.id] || 0);
+      if (short > 0) plan.short[s.id] = short;
+    });
+  }
+
   /* ---------- State ---------- */
 
   var state = {
@@ -987,7 +1126,7 @@
     var savedView = localStorage.getItem(VIEW_KEY);
     if (savedView === 'day' || savedView === 'week') state.view = savedView;
     var rawTargets = localStorage.getItem(TARGETS_KEY);
-    if (rawTargets) state.targets = JSON.parse(rawTargets) || {};
+    state.targets = rawTargets ? (JSON.parse(rawTargets) || {}) : JSON.parse(JSON.stringify(DEFAULT_TARGETS));
     var rawDone = localStorage.getItem(DONE_KEY);
     if (rawDone) state.done = JSON.parse(rawDone) || {};
   } catch (e) { /* private mode, corrupt JSON — carry on with an empty plan */ }
@@ -1158,6 +1297,7 @@
         var ov = state.overrides[key];
         if (ov === 'break') continue;
         if (SUBJ_BY_ID[ov]) continue;      // she has already planned this hour
+        if (plan.cell[key]) continue;      // the auto-plan has given this hour to a paper
 
         total++;
       }
@@ -1330,10 +1470,11 @@
         var ov = state.overrides[key];
         var isFixedBreak = !!BREAK_HOURS[key];
 
-        // Rotate through the papers coming up, one paper per block between breaks.
-        var suggestion = null;
+        // The auto-plan first; where it has nothing (past days, or every target
+        // already met) rotate through the papers coming up, one per block.
+        var suggestion = plan.cell[key] || null;
         var inStudyHours = h >= STUDY_START_HOUR && h < STUDY_END_HOUR;
-        if (!examSubj && !isFixedBreak && inStudyHours) {
+        if (!suggestion && !examSubj && !isFixedBreak && inStudyHours) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
             suggestion = upcoming[(suggestBlock[d.dateStr] || 0) % upcoming.length];
@@ -1513,9 +1654,17 @@
         updateTargets();
       });
 
+      // Re-plan the grid once she has finished typing, not on every keystroke.
+      input.addEventListener('change', function () {
+        buildPlan();
+        renderGrid(ALL_DAYS.filter(function (d) { return d.weekIdx === state.weekIndex; }));
+        updateTargets();
+      });
+
       targetUpdaters.push(function (planned) {
         var target = state.targets[s.id] || 0;
-        var scheduled = planned[s.id] || 0;
+        var scheduled = (planned[s.id] || 0) + (plan.got[s.id] || 0);
+        var short = plan.short[s.id] || 0;
         var left = Math.max(0, target - scheduled);
         var studied = state.done[s.id] || 0;
 
@@ -1531,7 +1680,9 @@
           if (scheduled > target) meta.appendChild(document.createTextNode(' — ' + (scheduled - target) + ' h over'));
         } else {
           meta.appendChild(document.createTextNode(scheduled + ' of ' + target + ' h planned · '));
-          meta.appendChild(el('strong', null, left + ' h left'));
+          meta.appendChild(short
+            ? el('strong', 'is-short', short + ' h short — no room before the paper')
+            : el('strong', null, left + ' h left'));
         }
 
         var max = sliderMax(s.id);
@@ -1578,7 +1729,7 @@
     var totalTarget = 0, totalLeft = 0, totalDone = 0;
     SUBJECTS.forEach(function (s) {
       var t = state.targets[s.id] || 0;
-      var p = planned[s.id] || 0;
+      var p = (planned[s.id] || 0) + (plan.got[s.id] || 0);
       totalTarget += t;
       totalLeft += Math.max(0, t - p);
       totalDone += state.done[s.id] || 0;
@@ -1596,10 +1747,11 @@
     }
     targetsSummaryEl.appendChild(el('strong', null, totalLeft === 0 ? 'Every hour planned' : totalLeft + ' h'));
     targetsSummaryEl.appendChild(document.createTextNode(
-      (totalLeft === 0 ? '' : ' still to plan') + ' · ' + totalDone + ' h studied'));
+      (totalLeft === 0 ? '' : ' don’t fit before the papers') + ' · ' + totalDone + ' h studied'));
   }
 
   function render() {
+    buildPlan();
     var weekDays = ALL_DAYS.filter(function (d) { return d.weekIdx === state.weekIndex; });
     renderWeeks();
     renderViewbar();
