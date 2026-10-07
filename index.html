@@ -775,10 +775,10 @@
       <p class="targets-note">
         Set the least hours you need for each paper and the grid plans them for you between 08:00 and 18:00 (20:00 on Saturdays),
         before each paper is written. If they still don&rsquo;t all fit, every paper gives up about the same share and its
-        card says how many hours are short. When the day is full, evenings up to 22:00 are used, but only for the
-        hours that would otherwise be missing. Anything you pick yourself counts too, and the plan works around it.
+        card says how many hours are short. Nothing is planned for today or earlier.
+        Anything you pick yourself counts too, and the plan works around it.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
-        what you have planned. Free hours are the study hours (08:00 to 18:00, Saturdays to 20:00), from today on, that nothing has been
+        what you have planned. Free hours are the study hours (08:00 to 18:00, Saturdays to 20:00), from tomorrow on, that nothing has been
         planned in yet. Each paper links to its SAG, opened at that paper&rsquo;s topics, and you can attach your own
         demarcation at the foot of its card; files stay on this device only.
       </p>
@@ -810,7 +810,8 @@
   var STUDY_START_HOUR = 8;
   var STUDY_END_HOUR = 18;
   var SAT_STUDY_END_HOUR = 20;   // she can work later on a Saturday
-  // Evenings up to here are only planned when a paper's hours do not fit in the day.
+  // Evenings to here can take the hours a day cannot hold. Off: she does not want to study that late.
+  var USE_EVENINGS = false;
   var EVENING_END_HOUR = 22;
   var SHOW_EXAM_BADGE = true;
   var STUDY_RUN = 2;          // hours of study before an hour's break
@@ -1015,9 +1016,10 @@
     var slots = [];               // { key, date, block, i }
     var block = 0;
     ALL_DAYS.forEach(function (d) {
-      if (d.dateStr < today) return;
+      if (d.dateStr <= today) return;     // nothing is planned for today or earlier
       block++;
-      for (var h = STUDY_START_HOUR; h < EVENING_END_HOUR; h++) {
+      var lastHour = USE_EVENINGS ? EVENING_END_HOUR : studyEndHour(d.weekday);
+      for (var h = STUDY_START_HOUR; h < lastHour; h++) {
         var key = d.dateStr + '_' + h;
         if (EXAM_MAP[key] || BREAK_HOURS[key] || state.overrides[key] !== undefined) { block++; continue; }
         var evening = h >= studyEndHour(d.weekday);
@@ -1302,7 +1304,7 @@
     var total = 0;
 
     ALL_DAYS.forEach(function (d) {
-      if (d.dateStr < today) return;
+      if (d.dateStr <= today) return;   // from tomorrow on, like the plan
 
       var firstMorningPaper = null;
       var data = EXAM_DATA[d.dateStr];
@@ -1503,7 +1505,7 @@
         // already met) rotate through the papers coming up, one per block.
         var suggestion = plan.cell[key] || null;
         var inStudyHours = h >= STUDY_START_HOUR && h < studyEndHour(d.weekday);
-        if (!suggestion && !examSubj && !isFixedBreak && inStudyHours) {
+        if (!suggestion && !examSubj && !isFixedBreak && inStudyHours && d.dateStr > today) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
             suggestion = upcoming[(suggestBlock[d.dateStr] || 0) % upcoming.length];
