@@ -800,8 +800,12 @@
 
   /* ---------- Configuration ---------- */
 
-  var DAY_START_HOUR = 8;
-  var DAY_END_HOUR = 18;      // every day, Saturday included
+  var DAY_START_HOUR = 6;
+  var DAY_END_HOUR = 22;      // capped to 20:00 on every day except Saturday
+  // Suggested study, breaks and free hours only use this window; the hours
+  // around it stay on the grid, empty, for her to fill in herself.
+  var STUDY_START_HOUR = 8;
+  var STUDY_END_HOUR = 18;
   var SHOW_EXAM_BADGE = true;
   var STUDY_RUN = 2;          // hours of study before an hour's break
   var REST_AFTER_EXAM = 3;    // hours off straight after a paper
@@ -942,8 +946,9 @@
     });
   }
 
-  function dayEndHour() {
-    return DAY_END_HOUR;
+  // Saturdays run late; every other day stops at 20:00.
+  function dayEndHour(weekday) {
+    return weekday === 'Sat' ? 22 : Math.min(DAY_END_HOUR, 20);
   }
 
   // An hour's break after every STUDY_RUN hours of study. The run restarts
@@ -956,7 +961,7 @@
     for (var x = DAY_START_HOUR; x < dayEndHour(d.weekday) && firstExam === null; x++) {
       if (EXAM_MAP[d.dateStr + '_' + x]) firstExam = x;
     }
-    for (var h = DAY_START_HOUR; h < dayEndHour(d.weekday); h++) {
+    for (var h = STUDY_START_HOUR; h < STUDY_END_HOUR; h++) {
       var key = d.dateStr + '_' + h;
       if (firstExam !== null && h < firstExam) { BREAK_HOURS[key] = true; continue; }
       if (EXAM_MAP[key]) { run = 0; continue; }
@@ -1144,8 +1149,7 @@
         });
       }
 
-      var end = dayEndHour(d.weekday);
-      for (var h = DAY_START_HOUR; h < end; h++) {
+      for (var h = STUDY_START_HOUR; h < STUDY_END_HOUR; h++) {
         if (firstMorningPaper !== null && h < firstMorningPaper) continue;
 
         var key = d.dateStr + '_' + h;
@@ -1329,7 +1333,8 @@
 
         // Rotate through the papers coming up, one paper per block between breaks.
         var suggestion = null;
-        if (!examSubj && !isFixedBreak) {
+        var inStudyHours = h >= STUDY_START_HOUR && h < STUDY_END_HOUR;
+        if (!examSubj && !isFixedBreak && inStudyHours) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
             suggestion = upcoming[(suggestBlock[d.dateStr] || 0) % upcoming.length];

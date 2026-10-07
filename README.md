@@ -11,7 +11,7 @@ Live: **https://voigtalani-maker.github.io/finals-planner/**
 - **Study time is suggested automatically** in every free hour, one subject per block between breaks, rotating through whichever papers are within the next fortnight. All study blocks are italic so they never get confused with a real exam; suggestions are also dashed and lighter, while the ones you pick yourself are solid and bold.
 - **Breaks are built in** — an hour off after every two hours of study (10:00, 13:00, 16:00 on a normal day). On exam days there is no study before the paper and none for the three hours after it; the count restarts after that.
 - Every non-exam hour is a dropdown: pick any subject, pick Break, or leave it free. Your choices override the suggestions and save automatically.
-- Days run 08:00–18:00, every day of the week.
+- The grid runs 06:00–20:00 (Saturdays to 22:00), but suggested study, breaks and the free-hours count only use **08:00–18:00**. The hours around that stay empty for you to fill in yourself.
 
 ## Hours per paper
 
