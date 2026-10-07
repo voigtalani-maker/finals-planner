@@ -800,10 +800,10 @@
 
   /* ---------- Configuration ---------- */
 
-  var DAY_START_HOUR = 6;
-  var DAY_END_HOUR = 22;      // capped to 20:00 on every day except Saturday
+  var DAY_START_HOUR = 8;
+  var DAY_END_HOUR = 18;      // every day, Saturday included
   var SHOW_EXAM_BADGE = true;
-  var FIXED_BREAK_HOURS = [12, 19];
+  var STUDY_RUN = 2;          // hours of study before an hour's break
   var LOOKAHEAD_DAYS = 14;    // only revise for papers this close
   // Starts a fortnight before the first paper (Fri 16 Oct) so the run-up is
   // plannable too. Choices are keyed by date, so widening this keeps them all.
@@ -939,10 +939,22 @@
     });
   }
 
-  // Saturdays run late; every other day stops at 20:00.
-  function dayEndHour(weekday) {
-    return weekday === 'Sat' ? 22 : Math.min(DAY_END_HOUR, 20);
+  function dayEndHour() {
+    return DAY_END_HOUR;
   }
+
+  // An hour's break after every STUDY_RUN hours of study. The run restarts
+  // after a paper (whose own break is POST_EXAM_BREAK), so breaks never double up.
+  var BREAK_HOURS = {};           // 'YYYY-MM-DD_H' -> true
+  ALL_DAYS.forEach(function (d) {
+    var run = 0;
+    for (var h = DAY_START_HOUR; h < dayEndHour(d.weekday); h++) {
+      var key = d.dateStr + '_' + h;
+      if (EXAM_MAP[key]) { run = 0; continue; }
+      if (POST_EXAM_BREAK[key] || run === STUDY_RUN) { BREAK_HOURS[key] = true; run = 0; continue; }
+      run++;
+    }
+  });
 
   /* ---------- State ---------- */
 
@@ -1129,7 +1141,7 @@
 
         var key = d.dateStr + '_' + h;
         if (EXAM_MAP[key]) continue;
-        if (FIXED_BREAK_HOURS.indexOf(h) !== -1 || POST_EXAM_BREAK[key]) continue;
+        if (BREAK_HOURS[key]) continue;
 
         var ov = state.overrides[key];
         if (ov === 'break') continue;
@@ -1286,7 +1298,7 @@
     });
 
     var maxEnd = Math.max.apply(null, weekDays.map(function (d) { return dayEndHour(d.weekday); }));
-    var suggestSlot = {};   // per day: how many study hours placed since the last break
+    var suggestBlock = {};  // per day: which study block (run between breaks) this hour is in
 
     for (var h = DAY_START_HOUR; h < maxEnd; h++) {
       gridEl.appendChild(el('div', 'hourlabel', fmtHour(h)));
@@ -1304,19 +1316,17 @@
         var key = d.dateStr + '_' + h;
         var examSubj = EXAM_MAP[key];
         var ov = state.overrides[key];
-        var isFixedBreak = FIXED_BREAK_HOURS.indexOf(h) !== -1 || !!POST_EXAM_BREAK[key];
+        var isFixedBreak = !!BREAK_HOURS[key];
 
-        // Rotate through the papers coming up, two hours each, restarting after every break.
+        // Rotate through the papers coming up, one paper per block between breaks.
         var suggestion = null;
         if (!examSubj && !isFixedBreak) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
-            var slot = suggestSlot[d.dateStr] || 0;
-            suggestion = upcoming[Math.floor(slot / 2) % upcoming.length];
-            suggestSlot[d.dateStr] = slot + 1;
+            suggestion = upcoming[(suggestBlock[d.dateStr] || 0) % upcoming.length];
           }
         } else if (isFixedBreak) {
-          suggestSlot[d.dateStr] = 0;
+          suggestBlock[d.dateStr] = (suggestBlock[d.dateStr] || 0) + 1;
         }
 
         var value = '';
