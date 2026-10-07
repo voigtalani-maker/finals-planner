@@ -775,7 +775,8 @@
       <p class="targets-note">
         Set the least hours you need for each paper and the grid plans them for you between 08:00 and 18:00 (20:00 on Saturdays),
         before each paper is written. If they still don&rsquo;t all fit, every paper gives up about the same share and its
-        card says how many hours are short. Nothing is planned for today or earlier.
+        card says how many hours are short. Breaks come after every three hours. Only on days that need it, the plan
+        adds an evening hour (never past 20:00) and then a 07:00 start. Nothing is planned for today or earlier.
         Anything you pick yourself counts too, and the plan works around it.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
         what you have planned. Free hours are the study hours (08:00 to 18:00, Saturdays to 20:00), from tomorrow on, that nothing has been
@@ -810,11 +811,12 @@
   var STUDY_START_HOUR = 8;
   var STUDY_END_HOUR = 18;
   var SAT_STUDY_END_HOUR = 20;   // she can work later on a Saturday
-  // Evenings to here can take the hours a day cannot hold. Off: she does not want to study that late.
-  var USE_EVENINGS = false;
-  var EVENING_END_HOUR = 22;
+  // Only on days the plan cannot otherwise fit: first an extra evening hour
+  // (never past EXTRA_END_HOUR, she does not want to study late), then a 07:00 start.
+  var EXTRA_END_HOUR = 20;
+  var EARLY_START_HOUR = 7;
   var SHOW_EXAM_BADGE = true;
-  var STUDY_RUN = 2;          // hours of study before an hour's break
+  var STUDY_RUN = 3;          // hours of study before an hour's break
   var REST_AFTER_EXAM = 3;    // hours off straight after a paper
   var LOOKAHEAD_DAYS = 14;    // only revise for papers this close
   // Starts a fortnight before the first paper (Fri 16 Oct) so the run-up is
@@ -971,21 +973,36 @@
   // An hour's break after every STUDY_RUN hours of study. The run restarts
   // after a paper (whose rest is POST_EXAM_BREAK), so breaks never double up.
   // On an exam day nothing is studied before the paper either.
+  // Recomputed by the planner, because a day it moves to a 07:00 start shifts its breaks.
+  var earlyDays = {};             // date -> true when the plan starts that day at 07:00
   var BREAK_HOURS = {};           // 'YYYY-MM-DD_H' -> true
-  ALL_DAYS.forEach(function (d) {
-    var run = 0;
-    var firstExam = null;
-    for (var x = DAY_START_HOUR; x < dayEndHour(d.weekday) && firstExam === null; x++) {
-      if (EXAM_MAP[d.dateStr + '_' + x]) firstExam = x;
-    }
-    for (var h = STUDY_START_HOUR; h < EVENING_END_HOUR; h++) {
-      var key = d.dateStr + '_' + h;
-      if (firstExam !== null && h < firstExam) { BREAK_HOURS[key] = true; continue; }
-      if (EXAM_MAP[key]) { run = 0; continue; }
-      if (POST_EXAM_BREAK[key] || run === STUDY_RUN) { BREAK_HOURS[key] = true; run = 0; continue; }
-      run++;
-    }
-  });
+
+  function studyStartHour(dateStr) {
+    return earlyDays[dateStr] ? EARLY_START_HOUR : STUDY_START_HOUR;
+  }
+
+  function lastPlanHour(weekday) {
+    return Math.max(EXTRA_END_HOUR, studyEndHour(weekday));
+  }
+
+  function computeBreaks() {
+    BREAK_HOURS = {};
+    ALL_DAYS.forEach(function (d) {
+      var run = 0;
+      var firstExam = null;
+      for (var x = DAY_START_HOUR; x < dayEndHour(d.weekday) && firstExam === null; x++) {
+        if (EXAM_MAP[d.dateStr + '_' + x]) firstExam = x;
+      }
+      for (var h = studyStartHour(d.dateStr); h < lastPlanHour(d.weekday); h++) {
+        var key = d.dateStr + '_' + h;
+        if (firstExam !== null && h < firstExam) { BREAK_HOURS[key] = true; continue; }
+        if (EXAM_MAP[key]) { run = 0; continue; }
+        if (POST_EXAM_BREAK[key] || run === STUDY_RUN) { BREAK_HOURS[key] = true; run = 0; continue; }
+        run++;
+      }
+    });
+  }
+  computeBreaks();
 
   /* ---------- Auto-plan: spread each paper's hours over the time before it ---------- */
 
@@ -1005,7 +1022,8 @@
   // When the targets cannot all fit, they are first scaled down so that every
   // paper squeezed by the same deadline loses the same share, instead of the
   // early papers getting everything and the later ones whatever is left.
-  function buildPlan() {
+  function planOnce() {
+    computeBreaks();
     var today = todayStr();
     var mine = plannedHours();
     var need = {};
@@ -1018,8 +1036,7 @@
     ALL_DAYS.forEach(function (d) {
       if (d.dateStr <= today) return;     // nothing is planned for today or earlier
       block++;
-      var lastHour = USE_EVENINGS ? EVENING_END_HOUR : studyEndHour(d.weekday);
-      for (var h = STUDY_START_HOUR; h < lastHour; h++) {
+      for (var h = studyStartHour(d.dateStr); h < lastPlanHour(d.weekday); h++) {
         var key = d.dateStr + '_' + h;
         if (EXAM_MAP[key] || BREAK_HOURS[key] || state.overrides[key] !== undefined) { block++; continue; }
         var evening = h >= studyEndHour(d.weekday);
@@ -1135,6 +1152,33 @@
       var short = need[s.id] - (plan.got[s.id] || 0);
       if (short > 0) plan.short[s.id] = short;
     });
+  }
+
+  // Plan, and while a paper is still short, start one more day at 07:00 and
+  // plan again. Each time it is the latest normal day before the first paper
+  // that is short, so the early mornings sit close to the paper they serve.
+  function buildPlan() {
+    var today = todayStr();
+    earlyDays = {};
+    planOnce();
+    for (var guard = 0; guard < ALL_DAYS.length; guard++) {
+      var shortIds = Object.keys(plan.short).sort(function (a, b) {
+        return EXAM_DATE[a] < EXAM_DATE[b] ? -1 : 1;
+      });
+      var pick = null;
+      for (var k = 0; k < shortIds.length && !pick; k++) {
+        for (var j = ALL_DAYS.length - 1; j >= 0; j--) {
+          var d = ALL_DAYS[j];
+          if (d.dateStr <= today || d.dateStr >= EXAM_DATE[shortIds[k]]) continue;
+          if (earlyDays[d.dateStr] || EXAM_DATA[d.dateStr]) continue;
+          pick = d.dateStr;
+          break;
+        }
+      }
+      if (!pick) break;
+      earlyDays[pick] = true;
+      planOnce();
+    }
   }
 
   /* ---------- State ---------- */
@@ -1316,7 +1360,7 @@
         });
       }
 
-      for (var h = STUDY_START_HOUR; h < studyEndHour(d.weekday); h++) {
+      for (var h = studyStartHour(d.dateStr); h < studyEndHour(d.weekday); h++) {
         if (firstMorningPaper !== null && h < firstMorningPaper) continue;
 
         var key = d.dateStr + '_' + h;
@@ -1504,7 +1548,7 @@
         // The auto-plan first; where it has nothing (past days, or every target
         // already met) rotate through the papers coming up, one per block.
         var suggestion = plan.cell[key] || null;
-        var inStudyHours = h >= STUDY_START_HOUR && h < studyEndHour(d.weekday);
+        var inStudyHours = h >= studyStartHour(d.dateStr) && h < studyEndHour(d.weekday);
         if (!suggestion && !examSubj && !isFixedBreak && inStudyHours && d.dateStr > today) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
