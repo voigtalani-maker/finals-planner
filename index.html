@@ -804,6 +804,7 @@
   var DAY_END_HOUR = 18;      // every day, Saturday included
   var SHOW_EXAM_BADGE = true;
   var STUDY_RUN = 2;          // hours of study before an hour's break
+  var REST_AFTER_EXAM = 3;    // hours off straight after a paper
   var LOOKAHEAD_DAYS = 14;    // only revise for papers this close
   // Starts a fortnight before the first paper (Fri 16 Oct) so the run-up is
   // plannable too. Choices are keyed by date, so widening this keeps them all.
@@ -877,8 +878,10 @@
     });
   });
 
-  var POST_EXAM_BREAK = {};       // the hour straight after a paper is always a break
-  EXAM_LIST.forEach(function (e) { POST_EXAM_BREAK[e.date + '_' + (e.lastHour + 1)] = true; });
+  var POST_EXAM_BREAK = {};       // the REST_AFTER_EXAM hours after a paper are always off
+  EXAM_LIST.forEach(function (e) {
+    for (var r = 1; r <= REST_AFTER_EXAM; r++) POST_EXAM_BREAK[e.date + '_' + (e.lastHour + r)] = true;
+  });
 
   function upcomingSubjectsForDate(dateStr) {
     var t0 = Date.parse(dateStr + 'T00:00:00Z');
@@ -944,12 +947,18 @@
   }
 
   // An hour's break after every STUDY_RUN hours of study. The run restarts
-  // after a paper (whose own break is POST_EXAM_BREAK), so breaks never double up.
+  // after a paper (whose rest is POST_EXAM_BREAK), so breaks never double up.
+  // On an exam day nothing is studied before the paper either.
   var BREAK_HOURS = {};           // 'YYYY-MM-DD_H' -> true
   ALL_DAYS.forEach(function (d) {
     var run = 0;
+    var firstExam = null;
+    for (var x = DAY_START_HOUR; x < dayEndHour(d.weekday) && firstExam === null; x++) {
+      if (EXAM_MAP[d.dateStr + '_' + x]) firstExam = x;
+    }
     for (var h = DAY_START_HOUR; h < dayEndHour(d.weekday); h++) {
       var key = d.dateStr + '_' + h;
+      if (firstExam !== null && h < firstExam) { BREAK_HOURS[key] = true; continue; }
       if (EXAM_MAP[key]) { run = 0; continue; }
       if (POST_EXAM_BREAK[key] || run === STUDY_RUN) { BREAK_HOURS[key] = true; run = 0; continue; }
       run++;

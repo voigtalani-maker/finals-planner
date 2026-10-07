@@ -9,7 +9,7 @@ Live: **https://voigtalani-maker.github.io/finals-planner/**
 - Eight weeks, 5 October – 29 November 2026, one column per day — the two weeks of run-up before the first paper, then the exam period itself.
 - **Exam papers fill themselves in** at their real session times — every paper starts at 09:00 (CAT P1 on 16 Oct through CAT P2 on 27 Nov, 14 papers). They show as solid dark blocks with a pastel edge in the subject's colour.
 - **Study time is suggested automatically** in every free hour, one subject per block between breaks, rotating through whichever papers are within the next fortnight. All study blocks are italic so they never get confused with a real exam; suggestions are also dashed and lighter, while the ones you pick yourself are solid and bold.
-- **Breaks are built in** — an hour off after every two hours of study (10:00, 13:00, 16:00 on a normal day), and the hour straight after every paper, with the count restarting after it.
+- **Breaks are built in** — an hour off after every two hours of study (10:00, 13:00, 16:00 on a normal day). On exam days there is no study before the paper and none for the three hours after it; the count restarts after that.
 - Every non-exam hour is a dropdown: pick any subject, pick Break, or leave it free. Your choices override the suggestions and save automatically.
 - Days run 08:00–18:00, every day of the week.
 
