@@ -776,7 +776,7 @@
         Set the least hours you need for each paper and the grid plans them for you between 08:00 and 18:00 (20:00 on Saturdays),
         before each paper is written. If they still don&rsquo;t all fit, every paper gives up about the same share and its
         card says how many hours are short. Breaks come after every three hours. Only on days that need it, the plan
-        adds an evening hour (never past 20:00) and then a 07:00 start. Nothing is planned for today or earlier.
+        adds an evening hour (never past 20:00) and then a 07:00 start. Today is always planned in full, nothing before 8 October is, and hours on the Studied bar come off what is left to plan.
         Anything you pick yourself counts too, and the plan works around it.
         Drag the <strong>Studied</strong> bar to log the hours you have really done, which is tracked separately from
         what you have planned. Free hours are the study hours (08:00 to 18:00, Saturdays to 20:00), from tomorrow on, that nothing has been
@@ -1014,6 +1014,28 @@
   // plan.short: subject id -> hours of its target that do not fit
   var plan = { cell: {}, got: {}, short: {}, eveningDays: {} };  // eveningDays: dates whose evening is used
 
+
+  // Nothing is ever planned before PLAN_FROM (on 7 Oct she asked for nothing on
+  // or before that day). From then on the plan always includes the whole of
+  // today, so the day she is on keeps its plan and she can see what to study.
+  var PLAN_FROM = '2026-10-08';
+
+  function planStartDate() {
+    var t = todayStr();
+    return t > PLAN_FROM ? t : PLAN_FROM;
+  }
+
+  // Her own picks from today on; earlier ones are on the Studied bar or missed.
+  function ownFromToday() {
+    var start = planStartDate();
+    var counts = {};
+    Object.keys(state.overrides).forEach(function (key) {
+      var v = state.overrides[key];
+      if (SUBJ_BY_ID[v] && key.split('_')[0] >= start) counts[v] = (counts[v] || 0) + 1;
+    });
+    return counts;
+  }
+
   // Fills every open study hour from today on (08:00-18:00, not a break, not an
   // exam, not something she picked) one block at a time. Each block goes to the
   // paper with the most hours still needed per open hour left before it is
@@ -1024,17 +1046,18 @@
   // early papers getting everything and the later ones whatever is left.
   function planOnce() {
     computeBreaks();
-    var today = todayStr();
-    var mine = plannedHours();
+    var start = planStartDate();
+    var mine = ownFromToday();
     var need = {};
     SUBJECTS.forEach(function (s) {
-      need[s.id] = Math.max(0, (state.targets[s.id] || 0) - (mine[s.id] || 0));
+      // Hours already studied are off the list; so are her own picks from today on.
+      need[s.id] = Math.max(0, (state.targets[s.id] || 0) - (state.done[s.id] || 0) - (mine[s.id] || 0));
     });
 
     var slots = [];               // { key, date, block, i }
     var block = 0;
     ALL_DAYS.forEach(function (d) {
-      if (d.dateStr <= today) return;     // nothing is planned for today or earlier
+      if (d.dateStr < start) return;
       block++;
       for (var h = studyStartHour(d.dateStr); h < lastPlanHour(d.weekday); h++) {
         var key = d.dateStr + '_' + h;
@@ -1158,7 +1181,7 @@
   // plan again. Each time it is the latest normal day before the first paper
   // that is short, so the early mornings sit close to the paper they serve.
   function buildPlan() {
-    var today = todayStr();
+    var start = planStartDate();
     earlyDays = {};
     planOnce();
     for (var guard = 0; guard < ALL_DAYS.length; guard++) {
@@ -1169,7 +1192,7 @@
       for (var k = 0; k < shortIds.length && !pick; k++) {
         for (var j = ALL_DAYS.length - 1; j >= 0; j--) {
           var d = ALL_DAYS[j];
-          if (d.dateStr <= today || d.dateStr >= EXAM_DATE[shortIds[k]]) continue;
+          if (d.dateStr <= start || d.dateStr >= EXAM_DATE[shortIds[k]]) continue;
           if (earlyDays[d.dateStr] || EXAM_DATA[d.dateStr]) continue;
           pick = d.dateStr;
           break;
@@ -1348,7 +1371,7 @@
     var total = 0;
 
     ALL_DAYS.forEach(function (d) {
-      if (d.dateStr <= today) return;   // from tomorrow on, like the plan
+      if (d.dateStr < planStartDate()) return;   // same days as the plan
 
       var firstMorningPaper = null;
       var data = EXAM_DATA[d.dateStr];
@@ -1549,7 +1572,7 @@
         // already met) rotate through the papers coming up, one per block.
         var suggestion = plan.cell[key] || null;
         var inStudyHours = h >= studyStartHour(d.dateStr) && h < studyEndHour(d.weekday);
-        if (!suggestion && !examSubj && !isFixedBreak && inStudyHours && d.dateStr > today) {
+        if (!suggestion && !examSubj && !isFixedBreak && inStudyHours && d.dateStr >= planStartDate()) {
           var upcoming = upcomingSubjectsForDate(d.dateStr);
           if (upcoming.length) {
             suggestion = upcoming[(suggestBlock[d.dateStr] || 0) % upcoming.length];
@@ -1721,6 +1744,13 @@
         updateTargets();
       });
 
+      // Studied hours come off what is left to plan, so re-plan once she lets go.
+      slider.addEventListener('change', function () {
+        buildPlan();
+        renderGrid(ALL_DAYS.filter(function (d) { return d.weekIdx === state.weekIndex; }));
+        updateTargets();
+      });
+
       input.addEventListener('input', function () {
         var n = parseInt(input.value, 10);
         if (isNaN(n) || n <= 0) delete state.targets[s.id];
@@ -1738,7 +1768,7 @@
 
       targetUpdaters.push(function (planned) {
         var target = state.targets[s.id] || 0;
-        var scheduled = (planned[s.id] || 0) + (plan.got[s.id] || 0);
+        var scheduled = (state.done[s.id] || 0) + (planned[s.id] || 0) + (plan.got[s.id] || 0);
         var short = plan.short[s.id] || 0;
         var left = Math.max(0, target - scheduled);
         var studied = state.done[s.id] || 0;
@@ -1798,13 +1828,13 @@
   }
 
   function updateTargets() {
-    var planned = plannedHours();
+    var planned = ownFromToday();
     targetUpdaters.forEach(function (fn) { fn(planned); });
 
     var totalTarget = 0, totalLeft = 0, totalDone = 0;
     SUBJECTS.forEach(function (s) {
       var t = state.targets[s.id] || 0;
-      var p = (planned[s.id] || 0) + (plan.got[s.id] || 0);
+      var p = (state.done[s.id] || 0) + (planned[s.id] || 0) + (plan.got[s.id] || 0);
       totalTarget += t;
       totalLeft += Math.max(0, t - p);
       totalDone += state.done[s.id] || 0;
